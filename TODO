@@ -1,0 +1,41 @@
+Workout:
+ - How to create branches?
+ - How to merge branches?
+ - How to delete branches?
+ - Create a user for the branch?
+ - Forbid schema changes to "production" branches
+
+
+
+
+
+Questions:
+ - Prune the hell outta the container so it's fast to spin up & doesn't waste RAM/CPU
+ - Authentication on the Vitess API
+ - Automatic TLS with Caddy???
+
+
+
+
+
+ - Production branches can't have schema changes applied (safe-migrations)
+
+ - Automated backup to S3
+
+ - Serverless adapter (supporting batch operations)
+
+ - https://vitess.io/blog/2021-12-16-rails-that-scales/
+ - https://vitess.io/blog/2021-02-19-online-ddl-in-vitess/
+ - https://vitess.io/blog/2021-02-19-online-ddl-in-vitess/
+
+- https://www.youtube.com/watch?v=uKdMR89mfdE
+- https://www.youtube.com/watch?v=C2DsT1_zK_4
+- https://www.youtube.com/watch?v=cPQuj4eTCdY
+
+
+We don't support:
+- Schema change rollbacks
+- Sharding
+- Read-replicas
+- Planetscale Boost
+

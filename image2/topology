@@ -1,0 +1,16 @@
+keyspaces {
+  name: "myunshardedks"
+  shards {
+    name: "0"
+  }
+}
+
+keyspaces {
+  name: "myshardedks",
+  shards {
+    name: "-80"
+  }
+  shards {
+    name: "80-"
+  }
+}
