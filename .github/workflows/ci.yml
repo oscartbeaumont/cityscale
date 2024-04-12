@@ -12,6 +12,9 @@ jobs:
   build-and-push:
     name: Build and push Docker image
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout code
         uses: actions/checkout@main
@@ -31,14 +34,18 @@ jobs:
       - name: Install Rust stable
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Build and push Docker image
+      - name: Build Docker image
         run: |
           pnpm -C web i
           export DOCKER_TAG="$DOCKER_BASE_TAG:$(git rev-parse --short HEAD)"
           ./dev.sh
+
+      - name: Push Docker image
+        run: |
+          export DOCKER_TAG="$DOCKER_BASE_TAG:$(git rev-parse --short HEAD)"
           docker push "$DOCKER_TAG"
 
-      - name: Tag the image as latest
+      - name: Tag and push the image as latest
         if: github.ref == 'refs/heads/main'
         run: |
           export COMMIT_DOCKER_TAG="$DOCKER_BASE_TAG:$(git rev-parse --short HEAD)"
