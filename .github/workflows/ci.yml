@@ -1,4 +1,4 @@
-name: Build and push Docker image
+name: CI
 
 on:
   push:
@@ -10,6 +10,7 @@ env:
 
 jobs:
   build-and-push:
+    name: Build and push Docker image
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
