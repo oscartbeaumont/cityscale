@@ -3,7 +3,16 @@ import { lazy } from "solid-js";
 
 export default [
   {
-    path: "/",
-    component: lazy(() => import("./index.tsx")),
+    path: "/login",
+    component: lazy(() => import("./login.tsx")),
+  },
+  {
+    component: lazy(() => import("./layout.tsx")),
+    children: [
+      {
+        path: "/",
+        component: lazy(() => import("./index.tsx")),
+      },
+    ],
   },
 ] satisfies RouteDefinition[];

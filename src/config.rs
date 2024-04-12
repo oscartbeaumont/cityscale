@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     io,
     ops::{Deref, DerefMut},
     path::PathBuf,
@@ -10,13 +11,26 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
+    /// Cookie secret for the dashboard authentication.
+    pub secret: String,
+    /// The root password for the MySQL server.
+    /// This is intended for Cityscale to talk with the DB but not be exposed to end-users.
     pub mysql_root_password: String,
+    /// User's who are allowed to access the admin panel.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub admins: HashMap<String, String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Self {
+            secret: Alphanumeric.sample_string(&mut rand::thread_rng(), 64),
             mysql_root_password: Alphanumeric.sample_string(&mut rand::thread_rng(), 32),
+            admins: HashMap::from([(
+                "admin".to_string(),
+                // "admin" argon2 hashed
+                "$argon2id$v=19$m=16,t=2,p=1$Y2l0eXNjYWxl$P3dUCcax9b1yc+LUlDLdWw".to_string(),
+            )]),
         }
     }
 }

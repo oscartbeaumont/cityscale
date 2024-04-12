@@ -9,6 +9,8 @@ set -e
 
 DOCKER_TAG="${DOCKER_TAG:-oscartbeaumont/cityscale:latest}"
 
+pnpm -C web build
+
 if [ "$(uname)" == "Linux" ]; then
     cargo build --release
 else
