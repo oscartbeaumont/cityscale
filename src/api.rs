@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
 use axum::{
     extract::{Path, Request, State},
-    http::StatusCode,
+    http::{request::Parts, HeaderValue, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -15,7 +15,8 @@ use rand::distributions::{Alphanumeric, DistString};
 use serde::Deserialize;
 use serde_json::json;
 use tower_cookies::{Cookie, CookieManagerLayer, Cookies, Key};
-use tower_serve_static::ServeDir;
+use tower_serve_static::{File, ServeDir, ServeFile};
+use tower_service::Service;
 use tracing::{error, warn};
 
 use crate::config::ConfigManager;
@@ -447,7 +448,25 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                 }))
                 .route_layer(middleware::from_fn_with_state(state.clone(), auth)),
         )
-        .fallback_service(ServeDir::new(&ASSETS_DIR))
+        .fallback({
+            let mut dir = ServeDir::new(&ASSETS_DIR);
+            let index_file = ASSETS_DIR.get_file("index.html").map(|file| ServeFile::new(File::new(file.contents(), HeaderValue::from_static("text/html")))).ok_or(()).map_err(|_| error!("unable to file 'index.html' file in dist dir")).ok();
+            
+            |parts: Parts| async move {
+                let result = dir.call(Request::from_parts(parts.clone(), ())).await;
+
+                if let Ok(resp) = &result {
+                    if resp.status() == 404 {
+                        if let Some(mut index_file) = index_file {
+                            return index_file.call(Request::from_parts(parts, ())).await.into_response();
+                        }
+                    }
+                }
+
+
+                result.into_response()
+            }
+        })
         .layer(CookieManagerLayer::new())
         .with_state(state)
 }

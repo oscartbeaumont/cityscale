@@ -316,6 +316,7 @@ dependencies = [
  "tokio",
  "tower-cookies",
  "tower-serve-static",
+ "tower-service",
  "tracing",
  "tracing-subscriber",
 ]
@@ -1727,6 +1728,7 @@ dependencies = [
  "http",
  "http-body",
  "http-body-util",
+ "httpdate",
  "include_dir",
  "mime",
  "mime_guess",
