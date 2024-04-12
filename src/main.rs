@@ -1,10 +1,12 @@
 use std::{
+    future::IntoFuture,
     net::{Ipv6Addr, SocketAddr},
     path::PathBuf,
     process,
 };
 
 use api::State;
+use tokio::signal;
 use tracing::{error, info};
 
 mod api;
@@ -48,10 +50,11 @@ async fn main() {
         process::exit(1);
     };
     info!("Listening on http://{listen_addr}");
-    let Ok(()) = axum::serve(listener, app)
-        .await
-        .map_err(|err| error!("Failed to serve: {err}"))
-    else {
+
+    let Ok(()) = (tokio::select! {
+        result = axum::serve(listener, app).into_future() => result.map_err(|err| error!("Failed to serve: {err}")),
+        result = signal::ctrl_c() => result.map_err(|err| error!("Failure with shutdown signal: {err}")),
+    }) else {
         process::exit(1);
     };
 }
