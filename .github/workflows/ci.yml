@@ -1,0 +1,36 @@
+name: Build and push Docker image
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  DOCKER_BASE_TAG: ghcr.io/oscartbeaumont/cityscale
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@main
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v1
+        with:
+          registry: ghcr.io
+          username: ${{github.actor}}
+          password: ${{secrets.GITHUB_TOKEN}}
+
+      - name: Build and push Docker image
+        run: |
+          export DOCKER_TAG="$DOCKER_BASE_TAG:$(git rev-parse --short HEAD)"
+          ./dev.sh
+          docker push "$DOCKER_TAG"
+
+      - name: Tag the image as latest
+        if: github.ref == 'refs/heads/main'
+        run: |
+          export COMMIT_DOCKER_TAG="$DOCKER_BASE_TAG:$(git rev-parse --short HEAD)"
+          docker tag = "$COMMIT_DOCKER_TAG" "$DOCKER_BASE_TAG:latest"
+          docker push "$DOCKER_BASE_TAG:latest"
