@@ -1,2 +1,7 @@
-# cityscale
-The MySQL database platform for side projects
+# Cityscale
+
+The MySQL database platform for side projects.
+
+### Features
+
+TODO
