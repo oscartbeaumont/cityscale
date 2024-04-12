@@ -3,3 +3,4 @@
 .DS_Store
 /docker/cityscale
 node_modules
+dist

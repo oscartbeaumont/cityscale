@@ -1,4 +1,5 @@
 import {
+  A,
   action,
   createAsync,
   redirect,
@@ -35,12 +36,14 @@ export default function Page(props: ParentProps) {
 
   return (
     <>
-      <h1 class="font-bold text-2xl">Cityscale</h1>
       <ErrorBoundary
         fallback={(err) => <p class="text-red-500">{err.toString()}</p>}
       >
         <Suspense fallback={<p>Authenticating...</p>}>
-          <div>
+          <div class="flex space-x-4 items-center p-4">
+            <A href="/">
+              <h1 class="font-bold text-4xl">Cityscale</h1>
+            </A>
             <p>Authenticated as: {auth()}</p>
             <button
               onClick={() => logout()}
@@ -49,7 +52,11 @@ export default function Page(props: ParentProps) {
               Logout
             </button>
           </div>
-          {props.children}
+          <ErrorBoundary
+            fallback={(err) => <p class="text-red-500">{err.toString()}</p>}
+          >
+            <Suspense fallback={<p>Loading...</p>}>{props.children}</Suspense>
+          </ErrorBoundary>
         </Suspense>
       </ErrorBoundary>
     </>

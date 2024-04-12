@@ -1,6 +1,14 @@
-use std::process::Command;
+use std::{path::PathBuf, process::Command};
 
 fn main() {
+    // include_dir requires the directory to exist
+    std::fs::create_dir_all(
+        PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+            .join("web")
+            .join("dist"),
+    )
+    .ok();
+
     let output = Command::new("git")
         .args(["rev-parse", "--short", "HEAD"])
         .output()
