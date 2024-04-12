@@ -5,16 +5,20 @@ use std::{
     sync::{Arc, PoisonError, RwLock, RwLockReadGuard, RwLockWriteGuard},
 };
 
+use rand::distributions::{Alphanumeric, DistString};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
-    branches: Vec<Branch>,
+    pub mysql_root_password: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Branch {
-    name: String,
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            mysql_root_password: Alphanumeric.sample_string(&mut rand::thread_rng(), 32),
+        }
+    }
 }
 
 type ConfigManagerInner = Arc<(PathBuf, RwLock<Config>)>;

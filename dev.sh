@@ -20,5 +20,5 @@ docker build --platform linux/amd64 -t "$DOCKER_TAG" ./docker
 
 if [ "$1" == "run" ]; then
     echo "Running container..."
-    docker run -it --rm --platform linux/amd64 -p 2489:2489 "$DOCKER_TAG"
+    docker run -it --rm --platform linux/amd64 -p 2489:2489 -p 3306:3306 "$DOCKER_TAG"
 fi
