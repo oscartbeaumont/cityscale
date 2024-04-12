@@ -22,8 +22,17 @@ jobs:
           username: ${{github.actor}}
           password: ${{secrets.GITHUB_TOKEN}}
 
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: latest
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Build and push Docker image
         run: |
+          pnpm i
           export DOCKER_TAG="$DOCKER_BASE_TAG:$(git rev-parse --short HEAD)"
           ./dev.sh
           docker push "$DOCKER_TAG"
