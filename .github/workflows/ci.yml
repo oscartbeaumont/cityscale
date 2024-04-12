@@ -10,7 +10,7 @@ env:
 
 jobs:
   build-and-push:
-    name: Build and push Docker image
+    name: Docker
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -49,5 +49,5 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: |
           export COMMIT_DOCKER_TAG="$DOCKER_BASE_TAG:$(git rev-parse --short HEAD)"
-          docker tag = "$COMMIT_DOCKER_TAG" "$DOCKER_BASE_TAG:latest"
+          docker tag "$COMMIT_DOCKER_TAG" "$DOCKER_BASE_TAG:latest"
           docker push "$DOCKER_BASE_TAG:latest"
