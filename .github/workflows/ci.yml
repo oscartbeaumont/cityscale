@@ -32,7 +32,7 @@ jobs:
 
       - name: Build and push Docker image
         run: |
-          pnpm i
+          pnpm -C web i
           export DOCKER_TAG="$DOCKER_BASE_TAG:$(git rev-parse --short HEAD)"
           ./dev.sh
           docker push "$DOCKER_TAG"
