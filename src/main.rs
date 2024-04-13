@@ -8,9 +8,9 @@ use std::{
     sync::Arc,
 };
 
-use mysql_async::OptsBuilder;
+use mysql_async::{Opts, OptsBuilder};
 use tokio::{process::Command, signal};
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::api::AppState;
 
@@ -47,70 +47,82 @@ async fn main() {
         process::exit(1);
     };
 
-    info!("Starting MySQL server...");
-    {
-        let mysql_dir = data_dir.join("mysql");
+    let db_opts = if let Ok(db_url) = env::var("MYSQL_SERVER") {
+        warn!("User provided 'MYSQL_SERVER' environment variable, skipping MySQL server...");
 
-        if !mysql_dir.exists() {
-            info!("Initializing MySQL data directory...");
-            fs::create_dir_all(&mysql_dir).ok();
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&mysql_dir, Permissions::from_mode(0o750))
-                    .map_err(|err| {
-                        error!("Failed to set permissions of MySQL data directory: {err}")
-                    })
-                    .ok();
+        Opts::from_url(&db_url)
+            .map_err(|err| {
+                error!("Failed to parse 'MYSQL_SERVER' URL: {err}");
+                process::exit(1);
+            })
+            .expect("")
+    } else {
+        info!("Starting MySQL server...");
+        {
+            let mysql_dir = data_dir.join("mysql");
 
-                Command::new("chown")
-                    .arg("mysql:mysql")
-                    .arg(&mysql_dir)
-                    .output()
-                    .await
-                    .map_err(|err| error!("Failed to chown MySQL data directory: {err}"))
-                    .ok();
+            if !mysql_dir.exists() {
+                info!("Initializing MySQL data directory...");
+                fs::create_dir_all(&mysql_dir).ok();
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&mysql_dir, Permissions::from_mode(0o750))
+                        .map_err(|err| {
+                            error!("Failed to set permissions of MySQL data directory: {err}")
+                        })
+                        .ok();
+
+                    Command::new("chown")
+                        .arg("mysql:mysql")
+                        .arg(&mysql_dir)
+                        .output()
+                        .await
+                        .map_err(|err| error!("Failed to chown MySQL data directory: {err}"))
+                        .ok();
+                }
+
+                // We rely on the Docker entrypoint for setup cause MySQL makes it a pain in the ass.
             }
 
-            // We rely on the Docker entrypoint for setup cause MySQL makes it a pain in the ass.
-        }
-
-        let Ok(mut cmd) = Command::new("/usr/local/bin/docker-entrypoint.sh")
-            // These args are forwarded to `mysqld``
-            .arg("--datadir")
-            .arg(mysql_dir)
-            // Configure the root password in the Docker entrypoints setup script
-            .env(
-                "MYSQL_ROOT_PASSWORD",
-                config.get().mysql_root_password.clone(),
-            )
-            .spawn()
-            .map_err(|err| error!("Failed to start MySQL: {err}"))
-        else {
-            process::exit(1);
-        };
-
-        tokio::spawn(async move {
-            let Ok(status) = cmd
-                .wait()
-                .await
-                .map_err(|err| error!("MySQL exited: {err}"))
+            let Ok(mut cmd) = Command::new("/usr/local/bin/docker-entrypoint.sh")
+                // These args are forwarded to `mysqld``
+                .arg("--datadir")
+                .arg(mysql_dir)
+                // Configure the root password in the Docker entrypoints setup script
+                .env(
+                    "MYSQL_ROOT_PASSWORD",
+                    config.get().mysql_root_password.clone(),
+                )
+                .spawn()
+                .map_err(|err| error!("Failed to start MySQL: {err}"))
             else {
                 process::exit(1);
             };
-            info!("MySQL exited with status: {status}");
-        });
-    }
 
-    let db = mysql_async::Pool::new(
+            tokio::spawn(async move {
+                let Ok(status) = cmd
+                    .wait()
+                    .await
+                    .map_err(|err| error!("MySQL exited: {err}"))
+                else {
+                    process::exit(1);
+                };
+                info!("MySQL exited with status: {status}");
+            });
+        }
+
         OptsBuilder::default()
             .ip_or_hostname("127.0.0.1")
             .tcp_port(3306)
             .user(Some("root"))
-            .pass(Some(config.get().mysql_root_password.clone())),
-    );
+            .pass(Some(config.get().mysql_root_password.clone()))
+            .into()
+    };
+
     let state = Arc::new(AppState {
-        db,
+        db: mysql_async::Pool::new(db_opts.clone()),
+        db_opts,
         data_dir,
         config,
     });

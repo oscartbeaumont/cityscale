@@ -1,3 +1,5 @@
+mod sql;
+
 use std::{path::PathBuf, sync::Arc};
 
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -25,6 +27,7 @@ use crate::config::ConfigManager;
 pub struct AppState {
     pub data_dir: PathBuf,
     pub config: ConfigManager,
+    pub db_opts: mysql_async::Opts,
     pub db: mysql_async::Pool,
 }
 
@@ -54,23 +57,7 @@ static ASSETS_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/web/dist");
 
 pub fn mount(state: Arc<AppState>) -> axum::Router {
     Router::new()
-        .route(
-            "/sql",
-            get(|State(state): State<Arc<AppState>>| async move {
-                // TODO: Error handling
-                let i: Vec<u64> = state
-                    .db
-                    .get_conn()
-                    .await
-                    .unwrap()
-                    .query("SELECT 1;")
-                    .await
-                    .unwrap();
-
-                // TODO: Proper Drizzle spec stuff
-                "ok!"
-            }),
-        )
+        .nest("/psdb.v1alpha1.Database", sql::mount())
         .route(
             "/api/login",
             post(
@@ -306,7 +293,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                                     warn!("Found non-numeric table name '{}', skipping", table_name);
                                     continue;
                                 }
-                                
+
                                 let Ok(schema) = format!("SHOW CREATE TABLE {db_name};")
                                     .map(&mut conn, |(_, table_name): (String, String)| table_name)
                                     .await
@@ -451,7 +438,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
         .fallback({
             let mut dir = ServeDir::new(&ASSETS_DIR);
             let index_file = ASSETS_DIR.get_file("index.html").map(|file| ServeFile::new(File::new(file.contents(), HeaderValue::from_static("text/html")))).ok_or(()).map_err(|_| error!("unable to file 'index.html' file in dist dir")).ok();
-            
+
             |parts: Parts| async move {
                 let result = dir.call(Request::from_parts(parts.clone(), ())).await;
 
