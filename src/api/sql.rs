@@ -82,8 +82,6 @@ post({
                     })).into_response());
                 }
 
-                debug!("Executing query {:?} on session {:?}", data.query, data.session.as_ref().map(|s| s.id));
-
                 let (columns, values) = if let Some(session) = data.session {
                     // TODO: Can we only lock the specific session, not all of them while the DB query is running
                     let mut sessions = pool.sessions.write().await;
@@ -123,7 +121,8 @@ post({
                             "timing": start.elapsed().as_secs_f64(),
                         })).into_response());
                     } else {
-                        let mut tx = sessions.remove(&session.id).ok_or_else(|| {
+                        debug!("Executing query {:?} on session {:?}", data.query, session.id);
+                        let tx = sessions.get_mut(&session.id).ok_or_else(|| {
                             debug!("Attempted to getting non-existent transaction {:?}", session.id);
                             error(format!("error getting non-existent transaction {:?}", session.id))
                         })?;
@@ -139,6 +138,7 @@ post({
                         (result.columns(), result.collect_and_drop::<Row>().await)
                     }
                 } else {
+                    debug!("Executing query {:?}", data.query);
                     let result =  conn
                         .exec_iter(&data.query, ())
                         .await
