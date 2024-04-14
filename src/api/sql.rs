@@ -18,6 +18,7 @@ use base64::{engine::general_purpose::STANDARD, Engine};
 use mysql_async::{
     consts::{ColumnFlags, ColumnType}, prelude::Queryable, Column, Conn, OptsBuilder, Pool, Row, Transaction, TxOpts, Value
 };
+use secstr::SecStr;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error};
@@ -26,8 +27,8 @@ use uuid::Uuid;
 use super::AppState;
 
 pub struct ConnectionPool {
-    /// A map of username + password combo's to database connections
-    connections: RwLock<HashMap<(String, String), mysql_async::Pool>>,
+    /// A map of username + database combo's to database connection & password
+    connections: RwLock<HashMap<(String, String), (SecStr, mysql_async::Pool)>>,
     /// Active database transactions
     sessions: tokio::sync::RwLock<HashMap<Uuid, Transaction<'static>>>,
 }
@@ -271,8 +272,9 @@ async fn authentication_and_get_db_conn(
     let Some((username, database)) = auth.username().split_once("%3B") else {
         return Err((StatusCode::BAD_REQUEST, "Invalid username. Must be in form 'username;db'").into_response());
     };
+    let password = SecStr::from(auth.password());
 
-    let key = (username.to_string(), auth.password().to_string());
+    let key = (username.to_string(), database.to_string());
     let result = pool
         .connections
         .read()
@@ -280,7 +282,13 @@ async fn authentication_and_get_db_conn(
         .get(&key)
         .cloned();
 
-    Ok(if let Some(db) = result {
+    Ok(if let Some((actual_password, db)) = result {
+        // TODO: If the user were to change password this would fail.
+        // TODO: Can we list to the biglog and invalidate the cache when users are modified???
+        if actual_password != password {
+            return Err(StatusCode::UNAUTHORIZED.into_response());
+        }
+
         let Ok(conn) = db
             .get_conn()
             .await
@@ -304,7 +312,7 @@ async fn authentication_and_get_db_conn(
                 pool.connections
                     .write()
                     .unwrap_or_else(PoisonError::into_inner)
-                    .insert(key, db.clone());
+                    .insert(key, (password, db.clone()));
                 (conn, db)
             }
             Err(mysql_async::Error::Server(err)) if err.code == 1045 => {
