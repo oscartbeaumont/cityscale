@@ -37,6 +37,10 @@ jobs:
       - name: Install cargo-zigbuild
         run: pip install cargo-zigbuild # This has the prebuilt binary + installs Zig
 
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: "true"
+
       - name: Build Docker image
         run: |
           pnpm -C web i
