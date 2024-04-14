@@ -1,7 +1,6 @@
 import { connect } from "@planetscale/database";
 
-let url =
-  "mysql://ly2rjxpj1y2rbcnyry3m:pscale_pw_6EN8Q4yIlhswoeGYV74GG7wTarGkffSO0uDYhoAkmNZ@aws.connect.psdb.cloud/spacedrive?sslaccept=strict";
+let url = "";
 url = "http://root;testing:admin@localhost:2489";
 
 const conn = connect({
