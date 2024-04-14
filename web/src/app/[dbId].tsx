@@ -75,6 +75,7 @@ export default function Page() {
   const executeForm = useSubmission(executeAction);
   const doExecute = useAction(executeAction);
   const [query, setQuery] = createSignal("");
+  const [result, setResult] = createSignal(null);
 
   return (
     <div class="p-4">
@@ -145,11 +146,21 @@ export default function Page() {
         <p>mysql://username:password@localhost:2489/{params.dbId}</p> */}
 
         <h1 class="font-bold text-xl">Execute</h1>
-        <Show when={executeForm.result}>
-          {(result) => (
-            <pre class="border p-4">{JSON.stringify(result(), null, 2)}</pre>
-          )}
+        <Show
+          when={result}
+          fallback={
+            <Show when={executeForm.result}>
+              {(result) => (
+                <pre class="border p-4">
+                  {JSON.stringify(result(), null, 2)}
+                </pre>
+              )}
+            </Show>
+          }
+        >
+          {(result) => <pre class="border p-4">{result()}</pre>}
         </Show>
+
         <textarea
           class="border"
           value={query()}
@@ -161,7 +172,18 @@ export default function Page() {
           disabled={executeForm.pending || query() === ""}
           onClick={(e) => {
             e.preventDefault();
-            doExecute(params.dbId, query());
+            const sql = query();
+            Promise.all(
+              sql
+                .split("--> statement-breakpoint")
+                .map((stmt) => doExecute(params.dbId, stmt))
+            ).then((results) => {
+              setResult(
+                results
+                  .map((result) => JSON.stringify(result, null, 2))
+                  .join("\n\n")
+              );
+            });
           }}
         >
           Run

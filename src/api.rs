@@ -1,5 +1,3 @@
-mod sql;
-
 use std::{path::PathBuf, sync::Arc};
 
 use argon2::{Argon2, PasswordHash, PasswordVerifier};
@@ -22,6 +20,9 @@ use tower_service::Service;
 use tracing::{debug, error, warn};
 
 use crate::config::ConfigManager;
+
+mod settings;
+mod sql;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -125,9 +126,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                         },
                     ),
                 )
-                .route("/admin", get(|| async { todo!() }))
-                .route("/admin", post(|| async { todo!() }))
-                .route("/admin", delete(|| async { todo!() }))
+                .nest("/settings", settings::mount())
                 .route(
                     "/database",
                     get(|State(state): State<Arc<AppState>>| async move {
@@ -184,7 +183,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
 
                     // TODO: This is a crude way to prevent SQL injection, can we do something better here?
                     // TODO: SQL parameters are not supported in CREATE DATABASE
-                    if !data.name.chars().all(|c| c.is_alphanumeric()) {
+                    if !data.name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
                         return (StatusCode::BAD_REQUEST, "Invalid database name").into_response();
                     }
 
@@ -219,7 +218,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
 
                     // TODO: This is a crude way to prevent SQL injection, can we do something better here?
                     // TODO: SQL parameters are not supported in CREATE DATABASE
-                    if !db_name.chars().all(|c| c.is_alphanumeric()) {
+                    if !db_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
                         return (StatusCode::BAD_REQUEST, "Invalid database name").into_response();
                     }
 
@@ -256,7 +255,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                             let db_name = &db_name;
                             // TODO: This is a crude way to prevent SQL injection, can we do something better here?
                             // TODO: SQL parameters are not supported in CREATE DATABASE
-                            if !db_name.chars().all(|c| c.is_alphanumeric()) {
+                            if !db_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-') {
                                 return (StatusCode::BAD_REQUEST, "Invalid database name").into_response();
                             }
 
@@ -289,12 +288,12 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                             let mut tables = Vec::new();
                             for table_name in table_names {
                                 // TODO: Proper SQL escaping
-                                if !table_name.chars().all(|c| c.is_alphanumeric()) {
+                                if !table_name.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '_' || c == '-') {
                                     warn!("Found non-numeric table name '{}', skipping", table_name);
                                     continue;
                                 }
 
-                                let Ok(schema) = format!("SHOW CREATE TABLE {table_name};")
+                                let Ok(schema) = format!("SHOW CREATE TABLE `{table_name}`;")
                                     .map(&mut conn, |(_, table_name): (String, String)| table_name)
                                     .await
                                     .map_err(|err| error!("Error getting table schema in DB '{}': {err}", db_name)) else {
@@ -351,7 +350,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                     };
 
                      // TODO: Proper SQL escaping
-                     if db_name.chars().any(|c| !c.is_alphanumeric()) {
+                     if db_name.chars().any(|c| !c.is_alphanumeric() || c == '_' || c == '-') {
                         return (StatusCode::BAD_REQUEST, "Invalid username").into_response();
                     }
                     // TODO: This kicks the connection from the pool. Can we workaround this???
@@ -408,13 +407,13 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                     let password = Alphanumeric.sample_string(&mut rand::thread_rng(), 32);
 
                     // TODO: Proper SQL escaping
-                    if data.username.chars().any(|c| !c.is_alphanumeric()) {
+                    if data.username.chars().any(|c| !c.is_alphanumeric() || c == '_' || c == '-') {
                         return (StatusCode::BAD_REQUEST, "Invalid username").into_response();
                     }
-                    if password.chars().any(|c| !c.is_alphanumeric()) {
+                    if password.chars().any(|c| !c.is_alphanumeric() || c == '_' || c == '-') {
                         return (StatusCode::BAD_REQUEST, "Invalid password").into_response();
                     }
-                    if db_name.chars().any(|c| !c.is_alphanumeric()) {
+                    if db_name.chars().any(|c| !c.is_alphanumeric() || c == '_' || c == '-') {
                         return (StatusCode::BAD_REQUEST, "Invalid database name").into_response();
                     }
 
@@ -469,7 +468,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                         return (StatusCode::NOT_FOUND, "User not found").into_response();
                     }
 
-                    if !username.chars().any(|c| c.is_alphanumeric()) {
+                    if !username.chars().any(|c| c.is_alphanumeric() || c == '_' || c == '-') {
                         return (StatusCode::BAD_REQUEST, "Invalid username").into_response();
                     }
 
