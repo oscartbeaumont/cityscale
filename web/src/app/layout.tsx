@@ -8,6 +8,7 @@ import {
   useSubmission,
 } from "@solidjs/router";
 import { ErrorBoundary, ParentProps, Suspense } from "solid-js";
+import logo from "../assets/logo.png";
 
 const logoutAction = action(async () => {
   const resp = await fetch("/api/logout", {
@@ -42,7 +43,11 @@ export default function Page(props: ParentProps) {
         <Suspense fallback={<p>Authenticating...</p>}>
           <div class="flex space-x-4 items-center p-4">
             <A href="/">
-              <h1 class="font-bold text-4xl">Cityscale</h1>
+              <img
+                src={logo}
+                class="w-12 h-12 hover:scale-105"
+                alt="Cityscale Logo"
+              />
             </A>
             <p>Authenticated as: {auth()}</p>
             <button

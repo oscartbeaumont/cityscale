@@ -294,7 +294,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                                     continue;
                                 }
 
-                                let Ok(schema) = format!("SHOW CREATE TABLE {db_name};")
+                                let Ok(schema) = format!("SHOW CREATE TABLE {table_name};")
                                     .map(&mut conn, |(_, table_name): (String, String)| table_name)
                                     .await
                                     .map_err(|err| error!("Error getting table schema in DB '{}': {err}", db_name)) else {

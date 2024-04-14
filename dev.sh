@@ -11,13 +11,9 @@ DOCKER_TAG="${DOCKER_TAG:-oscartbeaumont/cityscale:latest}"
 
 pnpm -C web build
 
-if [ "$(uname)" == "Linux" ]; then
-    cargo build --release
-    cp ./target/release/cityscale ./docker/cityscale
-else
-    cargo zigbuild --target x86_64-unknown-linux-gnu --release
-    cp ./target/x86_64-unknown-linux-gnu/release/cityscale ./docker/cityscale
-fi
+# We use `cargo-zigbuild` on Linux to avoid glibc issues.
+cargo zigbuild --target x86_64-unknown-linux-gnu --release
+cp ./target/x86_64-unknown-linux-gnu/release/cityscale ./docker/cityscale
 
 docker build --platform linux/amd64 -t "$DOCKER_TAG" ./docker
 

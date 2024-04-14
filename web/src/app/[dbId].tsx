@@ -117,6 +117,13 @@ export default function Page() {
             </div>
           )}
         </For>
+
+        <h1 class="font-bold text-xl">Connect</h1>
+        {/* TODO: Show proper URL for Railway users + env var for others to set it properly */}
+        <h3>Using DatabaseJS:</h3>
+        <pre>https://username;{params.dbId}:password@localhost:2489</pre>
+        <h3>Using MySQL:</h3>
+        <p>mysql://username:password@localhost:3306/{params.dbId}</p>
       </ErrorBoundary>
     </div>
   );
