@@ -365,7 +365,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                         return (StatusCode::BAD_REQUEST, "Invalid database name").into_response();
                     }
 
-                    let Ok(_) = format!(r#"CREATE USER '{}'@'%' IDENTIFIED BY '{password}' ATTRIBUTE '{{"cityscale_db": "{db_name}"}}';"#, data.username)
+                    let Ok(_) = format!(r#"CREATE USER '{0}'@'%' IDENTIFIED BY '{password}' ATTRIBUTE '{{"cityscale_db": "{db_name}"}}'; GRANT ALL PRIVILEGES ON {db_name} TO '{0}'@'%'; FLUSH PRIVILEGES;"#, data.username)
                         .ignore(&mut conn)
                         .await
                         .map_err(|err| error!("Error creating user '{}': {err}", data.username)) else {
