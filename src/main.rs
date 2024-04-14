@@ -2,7 +2,8 @@ use std::{
     env,
     fs::{self, Permissions},
     future::IntoFuture,
-    net::{Ipv6Addr, SocketAddr},
+    io,
+    net::{Ipv6Addr, SocketAddr, ToSocketAddrs},
     path::PathBuf,
     process,
     sync::Arc,
@@ -16,6 +17,7 @@ use crate::api::AppState;
 
 mod api;
 mod config;
+mod server;
 
 #[tokio::main]
 async fn main() {
@@ -127,6 +129,20 @@ async fn main() {
             .into()
     };
 
+    let Ok(mysql_addr) = format!("{}:{}", db_opts.ip_or_hostname(), db_opts.tcp_port())
+        .to_socket_addrs()
+        .and_then(|mut addrs| {
+            addrs.next().ok_or(io::Error::new(
+                io::ErrorKind::AddrNotAvailable,
+                "no addrs found",
+            ))
+        })
+        .map_err(|err| error!("Error resolving DB address: {err}"))
+    else {
+        error!("Failed to resolve MySQL address");
+        process::exit(1);
+    };
+
     let state = Arc::new(AppState {
         db: mysql_async::Pool::new(db_opts.clone()),
         db_opts,
@@ -141,10 +157,28 @@ async fn main() {
     else {
         process::exit(1);
     };
-    info!("Cityscale listening on http://{listen_addr}");
 
+    // TODO: This physically hurts me but I can't be bothered dealing with Hyper rn.
+    let Ok(internal_listener) = tokio::net::TcpListener::bind({
+        let mut addr = listen_addr.clone();
+        addr.set_port(0);
+        addr
+    })
+    .await
+    .map_err(|err| error!("Failed to bind to {listen_addr}: {err}")) else {
+        process::exit(1);
+    };
+    let Ok(internal_addr) = internal_listener
+        .local_addr()
+        .map_err(|err| error!("Failed to bind to {listen_addr}: {err}"))
+    else {
+        process::exit(1);
+    };
+
+    info!("Cityscale listening on http://{listen_addr}");
     let Ok(()) = (tokio::select! {
-        result = axum::serve(listener, app).into_future() => result.map_err(|err| error!("Failed to serve: {err}")),
+        _ = server::serve(listener, internal_addr, mysql_addr) => Ok(()),
+        result = axum::serve(internal_listener, app).into_future() => result.map_err(|err| error!("Failed to serve: {err}")),
         result = signal::ctrl_c() => result.map_err(|err| error!("Failure with shutdown signal: {err}")),
     }) else {
         process::exit(1);

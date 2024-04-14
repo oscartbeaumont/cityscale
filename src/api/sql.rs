@@ -289,13 +289,10 @@ async fn authentication_and_get_db_conn(
             return Err(StatusCode::UNAUTHORIZED.into_response());
         }
 
-        let Ok(conn) = db
-            .get_conn()
-            .await
-            .map_err(|err| error!("Error getting DB connection: {err}"))
-        else {
-            return Err(error(format!("error retrieving database connection")));
-        };
+        let conn = db.get_conn().await.map_err(|err| {
+            error!("Error getting DB connection: {err}");
+            error(format!("error retrieving database connection"))
+        })?;
 
         (conn, db)
     } else {
@@ -323,7 +320,7 @@ async fn authentication_and_get_db_conn(
             }
             Err(err) => {
                 error!("Error getting DB connection to new pool: {err}");
-                return Err(error(format!("error retrieving database connection")));
+                return Err(error(format!("error retrieving database connection: {err}")));
             }
         }
     })

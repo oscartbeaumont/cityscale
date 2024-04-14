@@ -41,21 +41,28 @@ export default function Page(props: ParentProps) {
         fallback={(err) => <p class="text-red-500">{err.toString()}</p>}
       >
         <Suspense fallback={<p>Authenticating...</p>}>
-          <div class="flex space-x-4 items-center p-4">
-            <A href="/">
-              <img
-                src={logo}
-                class="w-12 h-12 hover:scale-105"
-                alt="Cityscale Logo"
-              />
-            </A>
-            <p>Authenticated as: {auth()}</p>
-            <button
-              onClick={() => logout()}
-              disabled={logoutSubmission.pending}
-            >
-              Logout
-            </button>
+          <div class="flex justify-between items-center p-4">
+            <div class="flex space-x-4 items-center">
+              <A href="/">
+                <img
+                  src={logo}
+                  class="w-12 h-12 hover:scale-105"
+                  alt="Cityscale Logo"
+                />
+              </A>
+              <A href="/">Overview</A>
+              <A href="/backups">Backups</A>
+              <A href="/settings">Settings</A>
+            </div>
+            <div class="flex space-x-4 items-center">
+              <p>Authenticated as: {auth()}</p>
+              <button
+                onClick={() => logout()}
+                disabled={logoutSubmission.pending}
+              >
+                Logout
+              </button>
+            </div>
           </div>
           <ErrorBoundary
             fallback={(err) => <p class="text-red-500">{err.toString()}</p>}

@@ -17,6 +17,14 @@ export default [
         path: "/:dbId",
         component: lazy(() => import("./[dbId].tsx")),
       },
+      {
+        path: "/settings",
+        component: lazy(() => import("./settings/index.tsx")),
+      },
+      {
+        path: "/backups",
+        component: lazy(() => import("./backups.tsx")),
+      },
     ],
   },
 ] satisfies RouteDefinition[];

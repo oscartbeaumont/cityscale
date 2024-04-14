@@ -123,7 +123,7 @@ export default function Page() {
         <h3>Using DatabaseJS:</h3>
         <pre>https://username;{params.dbId}:password@localhost:2489</pre>
         <h3>Using MySQL:</h3>
-        <p>mysql://username:password@localhost:3306/{params.dbId}</p>
+        <p>mysql://username:password@localhost:2489/{params.dbId}</p>
       </ErrorBoundary>
     </div>
   );
