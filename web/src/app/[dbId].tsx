@@ -5,7 +5,7 @@ import {
   useParams,
   useSubmission,
 } from "@solidjs/router";
-import { ErrorBoundary, For, createSignal } from "solid-js";
+import { ErrorBoundary, For, Show, createSignal } from "solid-js";
 
 const createUserAction = action(async (db: string, username: string) => {
   const resp = await fetch(`/api/database/${encodeURIComponent(db)}/user`, {
@@ -17,7 +17,7 @@ const createUserAction = action(async (db: string, username: string) => {
       username,
     }),
   });
-  if (resp.status === 4000) {
+  if (resp.status === 400) {
     throw new Error("Invalid credentials!");
   } else if (resp.status !== 200) {
     throw new Error(`Error ${resp.status} authenticating!`);
@@ -35,12 +35,28 @@ const deleteUserAction = action(async (db: string, username: string) => {
       method: "DELETE",
     }
   );
-  if (resp.status === 4000) {
+  if (resp.status === 400) {
     throw new Error("Invalid credentials!");
   } else if (resp.status !== 200) {
     throw new Error(`Error ${resp.status} authenticating!`);
   }
   await resp.text(); // Make sure the handler is done on the backend
+});
+
+const executeAction = action(async (db: string, query: string) => {
+  const resp = await fetch(`/api/database/${encodeURIComponent(db)}/execute`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(query),
+  });
+  if (resp.status === 400) {
+    throw new Error("Invalid credentials!");
+  } else if (resp.status !== 200) {
+    throw new Error(`Error ${resp.status} authenticating!`);
+  }
+  return await resp.json();
 });
 
 export default function Page() {
@@ -56,6 +72,9 @@ export default function Page() {
   const doCreateUser = useAction(createUserAction);
   const deleteUserForm = useSubmission(deleteUserAction);
   const doDeleteUser = useAction(deleteUserAction);
+  const executeForm = useSubmission(executeAction);
+  const doExecute = useAction(executeAction);
+  const [query, setQuery] = createSignal("");
 
   return (
     <div class="p-4">
@@ -122,8 +141,31 @@ export default function Page() {
         {/* TODO: Show proper URL for Railway users + env var for others to set it properly */}
         <h3>Using DatabaseJS:</h3>
         <pre>https://username;{params.dbId}:password@localhost:2489</pre>
-        <h3>Using MySQL:</h3>
-        <p>mysql://username:password@localhost:2489/{params.dbId}</p>
+        {/* <h3>Using MySQL:</h3>
+        <p>mysql://username:password@localhost:2489/{params.dbId}</p> */}
+
+        <h1 class="font-bold text-xl">Execute</h1>
+        <Show when={executeForm.result}>
+          {(result) => (
+            <pre class="border p-4">{JSON.stringify(result(), null, 2)}</pre>
+          )}
+        </Show>
+        <textarea
+          class="border"
+          value={query()}
+          onChange={(e) => setQuery(e.target.value)}
+          disabled={executeForm.pending}
+          placeholder="SELECT 1;"
+        ></textarea>
+        <button
+          disabled={executeForm.pending || query() === ""}
+          onClick={(e) => {
+            e.preventDefault();
+            doExecute(params.dbId, query());
+          }}
+        >
+          Run
+        </button>
       </ErrorBoundary>
     </div>
   );

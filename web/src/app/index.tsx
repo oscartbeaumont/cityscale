@@ -18,7 +18,7 @@ const createDbAction = action(async (name: string) => {
       name,
     }),
   });
-  if (resp.status === 4000) {
+  if (resp.status === 400) {
     throw new Error("Invalid credentials!");
   } else if (resp.status !== 200) {
     throw new Error(`Error ${resp.status} authenticating!`);
@@ -35,7 +35,7 @@ const deleteDBAction = action(async (name: string) => {
       "Content-Type": "application/json",
     },
   });
-  if (resp.status === 4000) {
+  if (resp.status === 400) {
     throw new Error("Invalid credentials!");
   } else if (resp.status !== 200) {
     throw new Error(`Error ${resp.status} authenticating!`);

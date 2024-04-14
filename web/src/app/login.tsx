@@ -12,7 +12,7 @@ const loginAction = action(async (data: FormData) => {
       password: data.get("password"),
     }),
   });
-  if (resp.status === 4000) {
+  if (resp.status === 400) {
     throw new Error("Invalid credentials!");
   } else if (resp.status !== 200) {
     throw new Error(`Error ${resp.status} authenticating!`);

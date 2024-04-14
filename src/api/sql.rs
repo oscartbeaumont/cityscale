@@ -16,7 +16,9 @@ use axum_extra::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use mysql_async::{
-    consts::{ColumnFlags, ColumnType}, prelude::Queryable, Column, Conn, OptsBuilder, Pool, Row, Transaction, TxOpts, Value
+    consts::{ColumnFlags, ColumnType},
+    prelude::Queryable,
+    Column, Conn, OptsBuilder, Pool, Row, Transaction, TxOpts, Value,
 };
 use secstr::SecStr;
 use serde::{Deserialize, Serialize};
@@ -60,7 +62,7 @@ post({
                         error!("Error starting DB transaction: {err}");
                         error(format!("error starting DB transaction: {err:?}"))
                     })?;
-    
+
                     let id = Uuid::new_v4();
                     debug!("Creating new DB session {id:?}");
 
@@ -114,7 +116,7 @@ post({
                             error(format!("error rolling back transaction {:?}: {err:?}", session.id))
                         })?;
                         debug!("ROLLBACK transaction {:?}", session.id);
-                        
+
                         return Ok(Json(json!({
                             "session": session,
                             "result": json!({}),
@@ -135,7 +137,7 @@ post({
                             })?;
 
                         (result.columns(), result.collect_and_drop::<Row>().await)
-                    }                    
+                    }
                 } else {
                     let result =  conn
                         .exec_iter(&data.query, ())
@@ -156,7 +158,7 @@ post({
                 let fields = columns.as_deref()
                     .unwrap_or(&[])
                     .iter()
-                    .map(|col| 
+                    .map(|col|
                         json!({
                             "name": col.name_str().to_string(),
                             "type": column_type_to_str(&col),
@@ -270,7 +272,11 @@ async fn authentication_and_get_db_conn(
     auth: Basic,
 ) -> Result<(Conn, Pool), Response> {
     let Some((username, database)) = auth.username().split_once("%3B") else {
-        return Err((StatusCode::BAD_REQUEST, "Invalid username. Must be in form 'username;db'").into_response());
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Invalid username. Must be in form 'username;db'",
+        )
+            .into_response());
     };
     let password = SecStr::from(auth.password());
 
@@ -320,18 +326,24 @@ async fn authentication_and_get_db_conn(
             }
             Err(err) => {
                 error!("Error getting DB connection to new pool: {err}");
-                return Err(error(format!("error retrieving database connection: {err}")));
+                return Err(error(format!(
+                    "error retrieving database connection: {err}"
+                )));
             }
         }
     })
 }
 
 fn error(msg: String) -> Response {
-    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
-        "error": {
-            "message": msg,
-        }
-    }))).into_response()
+    (
+        StatusCode::INTERNAL_SERVER_ERROR,
+        Json(json!({
+            "error": {
+                "message": msg,
+            }
+        })),
+    )
+        .into_response()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -353,7 +365,7 @@ struct SqlRequest {
 fn column_type_to_str(col: &Column) -> &'static str {
     let is_signed = !col.flags().contains(ColumnFlags::UNSIGNED_FLAG);
     let is_binary = col.flags().contains(ColumnFlags::BINARY_FLAG);
-    
+
     if col.flags().contains(ColumnFlags::ENUM_FLAG) {
         return "ENUM";
     } else if col.flags().contains(ColumnFlags::SET_FLAG) {
@@ -387,10 +399,10 @@ fn column_type_to_str(col: &Column) -> &'static str {
         ColumnType::MYSQL_TYPE_NEWDECIMAL => todo!(),
         ColumnType::MYSQL_TYPE_ENUM => "ENUM",
         ColumnType::MYSQL_TYPE_SET => "SET",
-        ColumnType::MYSQL_TYPE_TINY_BLOB |
-        ColumnType::MYSQL_TYPE_MEDIUM_BLOB |
-        ColumnType::MYSQL_TYPE_LONG_BLOB |
-        ColumnType::MYSQL_TYPE_BLOB => t(is_binary, "BLOB", "TEXT"),
+        ColumnType::MYSQL_TYPE_TINY_BLOB
+        | ColumnType::MYSQL_TYPE_MEDIUM_BLOB
+        | ColumnType::MYSQL_TYPE_LONG_BLOB
+        | ColumnType::MYSQL_TYPE_BLOB => t(is_binary, "BLOB", "TEXT"),
         ColumnType::MYSQL_TYPE_VAR_STRING => t(is_binary, "VARBINARY", "VARCHAR"),
         ColumnType::MYSQL_TYPE_STRING => t(is_binary, "BINARY", "CHAR"),
         ColumnType::MYSQL_TYPE_GEOMETRY => "GEOMETRY",
@@ -403,5 +415,4 @@ fn t<T>(a_or_b: bool, a: T, b: T) -> T {
     } else {
         b
     }
-
 }

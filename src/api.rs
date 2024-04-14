@@ -12,14 +12,14 @@ use axum::{
     Json, Router,
 };
 use include_dir::{include_dir, Dir};
-use mysql_async::prelude::*;
+use mysql_async::{prelude::*, ChangeUserOpts, Row, Value};
 use rand::distributions::{Alphanumeric, DistString};
 use serde::Deserialize;
 use serde_json::json;
 use tower_cookies::{Cookie, CookieManagerLayer, Cookies, Key};
 use tower_serve_static::{File, ServeDir, ServeFile};
 use tower_service::Service;
-use tracing::{error, warn};
+use tracing::{debug, error, warn};
 
 use crate::config::ConfigManager;
 
@@ -336,6 +336,59 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                         },
                     ),
                 )
+                .route("/database/:db/execute", post(|State(state): State<Arc<AppState>>, Path(db_name): Path<String>, Json(stmt): Json<String>| async move {
+                    let Ok(mut conn) = state
+                        .db
+                        .get_conn()
+                        .await
+                        .map_err(|err| error!("Error getting DB connection: {err}"))
+                    else {
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Internal Server Error",
+                        )
+                            .into_response();
+                    };
+
+                     // TODO: Proper SQL escaping
+                     if db_name.chars().any(|c| !c.is_alphanumeric()) {
+                        return (StatusCode::BAD_REQUEST, "Invalid username").into_response();
+                    }
+                    // TODO: This kicks the connection from the pool. Can we workaround this???
+                    // TODO: Maybe try and use a random user in the SQL connection pooler???
+                    let Ok(_) = conn.change_user(ChangeUserOpts::new().with_db_name(Some(db_name.clone())))
+                        .await
+                        .map_err(|err| error!("Error changing DB to '{}': {err}", db_name)) else {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                        };
+
+                    debug!("Executing statement against database {db_name:?}: {stmt}");
+
+                    Json(match conn.exec_iter(stmt, ()).await {
+                        Ok(mut result) =>
+                            json!({
+                                "affected_rows": result.affected_rows(),
+                                "values": result.collect::<Row>().await.unwrap().into_iter().map(|mut row| {
+                                    let mut result = Vec::with_capacity(row.len());
+                                    for i in 0..row.len() {
+                                        let Some(value) = row.take::<Value, _>(i) else {
+                                            continue;
+                                        };
+
+                                        result.push(value.as_sql(true));
+                                    }
+
+                                    result
+                                }).flatten().collect::<Vec<_>>()
+                            }),
+                        Err(err) => {
+                            error!("Error executing statement: {err}");
+                            json!({
+                                "error": format!("{err}")
+                            })
+                        }
+                    }).into_response()
+                }))
                 .route("/database/:db/user", post(|State(state): State<Arc<AppState>>, Path(db_name): Path<String>, Json(data): Json<CreateDatabaseUser>| async move {
                     let Ok(mut conn) = state
                         .db
