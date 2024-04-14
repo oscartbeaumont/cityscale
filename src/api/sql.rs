@@ -16,8 +16,7 @@ use axum_extra::{
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
 use mysql_async::{
-    consts::ColumnType, prelude::Queryable, Conn, OptsBuilder, Pool, Row, Transaction, TxOpts,
-    Value,
+    consts::{ColumnFlags, ColumnType}, prelude::Queryable, Column, Conn, OptsBuilder, Pool, Row, Transaction, TxOpts, Value
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -45,7 +44,7 @@ pub fn mount() -> Router<Arc<AppState>> {
         "/Execute",
 post({
     let pool = pool.clone();
-    move |State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)): TypedHeader<Authorization<Basic>>, Json(mut data): Json<SqlRequest>|
+    move |State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)): TypedHeader<Authorization<Basic>>, Json(data): Json<SqlRequest>|
         {
             let pool = pool.clone();
             async move {
@@ -150,72 +149,61 @@ post({
                 let fields = columns.as_deref()
                     .unwrap_or(&[])
                     .iter()
-                    .map(|col| {
-                        let column_type = match col.column_type() {
-                            ColumnType::MYSQL_TYPE_DECIMAL => todo!(),
-                            ColumnType::MYSQL_TYPE_TINY => todo!(),
-                            ColumnType::MYSQL_TYPE_SHORT => todo!(),
-                            ColumnType::MYSQL_TYPE_LONG => todo!(),
-                            ColumnType::MYSQL_TYPE_FLOAT => todo!(),
-                            ColumnType::MYSQL_TYPE_DOUBLE => todo!(),
-                            ColumnType::MYSQL_TYPE_NULL => todo!(),
-                            ColumnType::MYSQL_TYPE_TIMESTAMP => todo!(),
-                            ColumnType::MYSQL_TYPE_LONGLONG => "INT64", // TODO: Is this correct?
-                            ColumnType::MYSQL_TYPE_INT24 => todo!(),
-                            ColumnType::MYSQL_TYPE_DATE => todo!(),
-                            ColumnType::MYSQL_TYPE_TIME => todo!(),
-                            ColumnType::MYSQL_TYPE_DATETIME => todo!(),
-                            ColumnType::MYSQL_TYPE_YEAR => todo!(),
-                            ColumnType::MYSQL_TYPE_NEWDATE => todo!(),
-                            ColumnType::MYSQL_TYPE_VARCHAR => todo!(),
-                            ColumnType::MYSQL_TYPE_BIT => todo!(),
-                            ColumnType::MYSQL_TYPE_TIMESTAMP2 => todo!(),
-                            ColumnType::MYSQL_TYPE_DATETIME2 => todo!(),
-                            ColumnType::MYSQL_TYPE_TIME2 => todo!(),
-                            ColumnType::MYSQL_TYPE_TYPED_ARRAY => todo!(),
-                            ColumnType::MYSQL_TYPE_UNKNOWN => todo!(),
-                            ColumnType::MYSQL_TYPE_JSON => todo!(),
-                            ColumnType::MYSQL_TYPE_NEWDECIMAL => todo!(),
-                            ColumnType::MYSQL_TYPE_ENUM => todo!(),
-                            ColumnType::MYSQL_TYPE_SET => todo!(),
-                            ColumnType::MYSQL_TYPE_TINY_BLOB => todo!(),
-                            ColumnType::MYSQL_TYPE_MEDIUM_BLOB => todo!(),
-                            ColumnType::MYSQL_TYPE_LONG_BLOB => todo!(),
-                            ColumnType::MYSQL_TYPE_BLOB => todo!(),
-                            ColumnType::MYSQL_TYPE_VAR_STRING => todo!(),
-                            ColumnType::MYSQL_TYPE_STRING => todo!(),
-                            ColumnType::MYSQL_TYPE_GEOMETRY => todo!(),
-                        };
-
+                    .map(|col| 
                         json!({
                             "name": col.name_str().to_string(),
-                            "type": column_type,
+                            "type": column_type_to_str(&col),
                             "charset": col.character_set(),
                             "flags": col.flags().bits()
                         })
-                    })
+                    )
                     .collect::<Vec<_>>();
 
                 let rows = values
                     .into_iter()
                     .map(|mut row| {
                         let mut lengths = Vec::new();
-                        let mut values = String::new();
+                        let mut values = Vec::new();
 
-                        while let Some(value) = row.take(0) {
-                            let result = match value {
-                                Value::NULL => todo!(),
-                                Value::Bytes(_) => todo!(),
-                                Value::Int(i) => i.to_string(),
-                                Value::UInt(_) => todo!(),
-                                Value::Float(_) => todo!(),
-                                Value::Double(_) => todo!(),
-                                Value::Date(_, _, _, _, _, _, _) => todo!(),
-                                Value::Time(_, _, _, _, _, _) => todo!(),
+                        for i in 0..row.len() {
+                            let Some(value) = row.take(i) else {
+                                continue;
                             };
 
-                            lengths.push(result.len());
-                            values.push_str(&result);
+                            let result = match value {
+                                Value::NULL => {
+                                    lengths.push(-1i64);
+                                    continue;
+                                },
+                                Value::Bytes(v) => {
+                                    lengths.push(v.len().try_into().expect("unable to cast usize to i64. How big are your damn pointers?"));
+                                    values.extend(v);
+                                    continue;
+                                },
+                                Value::Int(i) => i.to_string(),
+                                Value::UInt(i) => i.to_string(),
+                                Value::Float(i) => i.to_string(),
+                                Value::Double(i) => i.to_string(),
+                                // TODO: Planetscale seems to wipe out the fractional seconds, idk why but we are gonna copy for now.
+                                Value::Date(year, month, day, hour, minute, second, _) => {
+                                    if row.columns_ref()[i].column_type() == ColumnType::MYSQL_TYPE_DATE {
+                                        format!("{:04}-{:02}-{:02}", year, month, day)
+                                    } else {
+                                        format!("{:04}-{:02}-{:02} {:02}:{:02}:{:02}", year, month, day, hour, minute, second)
+                                    }
+                                },
+                                // TODO: Planetscale seems to wipe out the fractional seconds, idk why but we are gonna copy for now.
+                                Value::Time(neg, d, h, i, s, _) => {
+                                    if neg {
+                                        format!("-{:02}:{:02}:{:02}", d * 24 + u32::from(h), i, s)
+                                    } else {
+                                        format!("{:02}:{:02}:{:02}", d * 24 + u32::from(h), i, s)
+                                    }
+                                }
+                            };
+
+                            lengths.push(result.len().try_into().expect("unable to cast usize to i64. How big are your damn pointers?"));
+                            values.extend(result.as_bytes());
                         }
 
                     json!({
@@ -275,7 +263,11 @@ async fn authentication_and_get_db_conn(
     state: &AppState,
     auth: Basic,
 ) -> Result<(Conn, Pool), Response> {
-    let key = (auth.username().to_string(), auth.password().to_string());
+    let Some((username, database)) = auth.username().split_once("%3B") else {
+        return Err((StatusCode::BAD_REQUEST, "Invalid username. Must be in form 'username;db'").into_response());
+    };
+
+    let key = (username.to_string(), auth.password().to_string());
     let result = pool
         .connections
         .read()
@@ -298,8 +290,9 @@ async fn authentication_and_get_db_conn(
     } else {
         let db = mysql_async::Pool::new(
             OptsBuilder::from_opts(state.db_opts.clone())
-                .user(Some(auth.username()))
+                .user(Some(username))
                 .pass(Some(auth.password()))
+                .db_name(Some(database)) // TODO: This will cause issues - https://github.com/oscartbeaumont/cityscale/issues/23
                 .stmt_cache_size(0), // TODO: Should we renable this? It breaks transactions
         );
 
@@ -325,12 +318,73 @@ async fn authentication_and_get_db_conn(
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct TransactionSession {
+struct TransactionSession {
     id: Uuid,
 }
 
 #[derive(Deserialize)]
-pub struct SqlRequest {
+struct SqlRequest {
     query: String,
     session: Option<TransactionSession>,
+}
+
+// Convert MySQL column types to Vitess column types
+//
+// Ref:
+// - https://github.com/vitessio/vitess/blob/9e40015748ede158357bd7291f583db138abc3df/go/sqltypes/type.go#L142
+// - https://vitess.io/files/version-pdfs/Vitess-Docs-6.0-04-29-2020.pdf
+fn column_type_to_str(col: &Column) -> &'static str {
+    let is_signed = !col.flags().contains(ColumnFlags::UNSIGNED_FLAG);
+    let is_binary = col.flags().contains(ColumnFlags::BINARY_FLAG);
+    
+    if col.flags().contains(ColumnFlags::ENUM_FLAG) {
+        return "ENUM";
+    } else if col.flags().contains(ColumnFlags::SET_FLAG) {
+        return "SET";
+    }
+
+    match col.column_type() {
+        ColumnType::MYSQL_TYPE_DECIMAL => "DECIMAL",
+        ColumnType::MYSQL_TYPE_TINY => t(is_signed, "INT8", "UINT8"),
+        ColumnType::MYSQL_TYPE_SHORT => t(is_signed, "INT16", "UINT16"),
+        ColumnType::MYSQL_TYPE_LONG => t(is_signed, "INT32", "UINT32"),
+        ColumnType::MYSQL_TYPE_FLOAT => "FLOAT32",
+        ColumnType::MYSQL_TYPE_DOUBLE => "FLOAT64",
+        ColumnType::MYSQL_TYPE_NULL => "NULL",
+        ColumnType::MYSQL_TYPE_TIMESTAMP => "TIMESTAMP",
+        ColumnType::MYSQL_TYPE_LONGLONG => t(is_signed, "INT64", "UINT64"),
+        ColumnType::MYSQL_TYPE_INT24 => t(is_signed, "INT24", "UINT24"),
+        ColumnType::MYSQL_TYPE_DATE => "DATE",
+        ColumnType::MYSQL_TYPE_TIME => "TIME",
+        ColumnType::MYSQL_TYPE_DATETIME => "DATETIME",
+        ColumnType::MYSQL_TYPE_YEAR => "YEAR",
+        ColumnType::MYSQL_TYPE_NEWDATE => unreachable!("Internal to MySQL."),
+        ColumnType::MYSQL_TYPE_VARCHAR => "VARCHAR",
+        ColumnType::MYSQL_TYPE_BIT => "BIT",
+        ColumnType::MYSQL_TYPE_TIMESTAMP2 => todo!(),
+        ColumnType::MYSQL_TYPE_DATETIME2 => todo!(),
+        ColumnType::MYSQL_TYPE_TIME2 => todo!(),
+        ColumnType::MYSQL_TYPE_TYPED_ARRAY => unreachable!("Used for replication only."),
+        ColumnType::MYSQL_TYPE_UNKNOWN => unreachable!(),
+        ColumnType::MYSQL_TYPE_JSON => "JSON",
+        ColumnType::MYSQL_TYPE_NEWDECIMAL => todo!(),
+        ColumnType::MYSQL_TYPE_ENUM => "ENUM",
+        ColumnType::MYSQL_TYPE_SET => "SET",
+        ColumnType::MYSQL_TYPE_TINY_BLOB |
+        ColumnType::MYSQL_TYPE_MEDIUM_BLOB |
+        ColumnType::MYSQL_TYPE_LONG_BLOB |
+        ColumnType::MYSQL_TYPE_BLOB => t(is_binary, "BLOB", "TEXT"),
+        ColumnType::MYSQL_TYPE_VAR_STRING => t(is_binary, "VARBINARY", "VARCHAR"),
+        ColumnType::MYSQL_TYPE_STRING => t(is_binary, "BINARY", "CHAR"),
+        ColumnType::MYSQL_TYPE_GEOMETRY => "GEOMETRY",
+    }
+}
+
+fn t<T>(a_or_b: bool, a: T, b: T) -> T {
+    if a_or_b {
+        a
+    } else {
+        b
+    }
+
 }
