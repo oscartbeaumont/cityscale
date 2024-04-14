@@ -24,8 +24,10 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            secret: Alphanumeric.sample_string(&mut rand::thread_rng(), 64),
-            mysql_root_password: Alphanumeric.sample_string(&mut rand::thread_rng(), 32),
+            secret: std::env::var("UNSAFE_CITYSCALE_SECRET")
+                .unwrap_or(Alphanumeric.sample_string(&mut rand::thread_rng(), 64)),
+            mysql_root_password: std::env::var("UNSAFE_CITYSCALE_MYSQL_ROOT_PASSWORD")
+                .unwrap_or(Alphanumeric.sample_string(&mut rand::thread_rng(), 32)),
             admins: HashMap::from([(
                 "admin".to_string(),
                 // "admin" argon2 hashed

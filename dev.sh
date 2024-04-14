@@ -23,5 +23,5 @@ docker build --platform linux/amd64 -t "$DOCKER_TAG" ./docker
 
 if [ "$1" == "run" ]; then
     echo "Running container..."
-    docker run -it --rm --platform linux/amd64 -p 2489:2489 -p 3306:3306 "$DOCKER_TAG"
+    docker run -it --rm --platform linux/amd64 -p 2489:2489 -p 3306:3306 -e "UNSAFE_CITYSCALE_SECRET=ce33b0940b56c671666ed7ce3b00bddaafbdffdc1b95d780465efc68e93898c6be05cadb5db47dd5a1f27d4d8e7d67c0" -e "UNSAFE_CITYSCALE_MYSQL_ROOT_PASSWORD=admin" "$DOCKER_TAG"
 fi
