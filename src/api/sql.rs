@@ -49,18 +49,16 @@ post({
             let pool = pool.clone();
             async move {
                 // TODO: Check the credentials against the transaction session to avoid needing to create another connection that will just be dropped
-                let (mut conn, db) = match authentication_and_get_db_conn(&pool, &state, auth).await {
-                    Ok(conn) => conn,
-                    Err(res) => return res,
-                };
+                let (mut conn, db) = authentication_and_get_db_conn(&pool, &state, auth).await?;
 
                 let start = std::time::Instant::now();
                 let mut session = None;
 
                 if data.query == "BEGIN" {
-                    let Ok(tx) = db.start_transaction(TxOpts::default()).await.map_err(|err| error!("Error starting DB transaction: {err}")) else {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
-                    };
+                    let tx = db.start_transaction(TxOpts::default()).await.map_err(|err| {
+                        error!("Error starting DB transaction: {err}");
+                        error(format!("error starting DB transaction: {err:?}"))
+                    })?;
     
                     let id = Uuid::new_v4();
                     debug!("Creating new DB session {id:?}");
@@ -74,11 +72,11 @@ post({
                     });
 
                     // `BEGIN` is run by `db.start_transaction` so we don't actually wanna execute it
-                    return Json(json!({
+                    return Ok(Json(json!({
                         "session": session,
                         "result": json!({}),
                         "timing": start.elapsed().as_secs_f64(),
-                    })).into_response();
+                    })).into_response());
                 }
 
                 debug!("Executing query {:?} on session {:?}", data.query, data.session.as_ref().map(|s| s.id));
@@ -88,63 +86,71 @@ post({
                     let mut sessions = pool.sessions.write().await;
 
                     if data.query == "COMMIT" {
-                        let Some(tx) = sessions.remove(&session.id) else {
-                            return (StatusCode::BAD_REQUEST, "Invalid session").into_response();
-                        };
+                        let tx = sessions.remove(&session.id).ok_or_else(|| {
+                            debug!("Attempted to commit non-existent transaction {:?}", session.id);
+                            error(format!("error committing non-existent transaction {:?}", session.id))
+                        })?;
 
-                        let Ok(_) = tx.commit().await.map_err(|err| error!("Error committing transaction: {err}")) else {
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
-                        };
+                        tx.commit().await.map_err(|err| {
+                            error!("Error committing transaction: {err}");
+                            error(format!("error committing transaction {:?}: {err:?}", session.id))
+                        })?;
                         debug!("COMMIT transaction {:?}", session.id);
 
-                        return Json(json!({
+                        return Ok(Json(json!({
                             "session": session,
                             "result": json!({}),
                             "timing": start.elapsed().as_secs_f64(),
-                        })).into_response();
+                        })).into_response());
                     } else if data.query == "ROLLBACK" {
-                        let Some(tx) = sessions.remove(&session.id) else {
-                            return (StatusCode::BAD_REQUEST, "Invalid session").into_response();
-                        };
+                        let tx = sessions.remove(&session.id).ok_or_else(|| {
+                            debug!("Attempted to rollback non-existent transaction {:?}", session.id);
+                            error(format!("error rolling back non-existent transaction {:?}", session.id))
+                        })?;
 
-                        let Ok(_) = tx.rollback().await.map_err(|err| error!("Error rolling back transaction: {err}")) else {
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
-                        };
+                        tx.rollback().await.map_err(|err| {
+                            error!("Error rolling back transaction: {err}");
+                            error(format!("error rolling back transaction {:?}: {err:?}", session.id))
+                        })?;
                         debug!("ROLLBACK transaction {:?}", session.id);
                         
-                        return Json(json!({
+                        return Ok(Json(json!({
                             "session": session,
                             "result": json!({}),
                             "timing": start.elapsed().as_secs_f64(),
-                        })).into_response();
+                        })).into_response());
                     } else {
-                        let Some(tx) = sessions.get_mut(&session.id) else {
-                            return (StatusCode::BAD_REQUEST, "Invalid session").into_response();
-                        };
+                        let mut tx = sessions.remove(&session.id).ok_or_else(|| {
+                            debug!("Attempted to getting non-existent transaction {:?}", session.id);
+                            error(format!("error getting non-existent transaction {:?}", session.id))
+                        })?;
 
-                        let Ok(result) = tx
-                        .exec_iter(&data.query, ())
-                        .await
-                        .map_err(|err| error!("Error executing query: {err}")) else {
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
-                        };
+                        let result = tx
+                            .exec_iter(&data.query, ())
+                            .await
+                            .map_err(|err| {
+                                error!("Error executing query against transaction {:?}: {err}", session.id);
+                                error(format!("error executing query: {err:?}"))
+                            })?;
 
                         (result.columns(), result.collect_and_drop::<Row>().await)
                     }                    
                 } else {
-                    let Ok(result) =  conn
+                    let result =  conn
                         .exec_iter(&data.query, ())
                         .await
-                        .map_err(|err| error!("Error executing query: {err}")) else {
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
-                        };
+                        .map_err(|err| {
+                            error!("Error executing query {:?}: {err}", session.as_ref().map(|s| s.id));
+                            error(format!("error executing query: {err:?}"))
+                        })?;
 
                     (result.columns(), result.collect_and_drop::<Row>().await)
                 };
 
-                let Ok(values) = values.map_err(|err| error!("Error getting values: {err}")) else {
-                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
-                };
+                let values = values.map_err(|err| {
+                    error!("Error getting values: {err}");
+                    error(format!("error decoding values: {err:?}"))
+                })?;
 
                 let fields = columns.as_deref()
                     .unwrap_or(&[])
@@ -213,7 +219,7 @@ post({
                 })
                 .collect::<Vec<_>>();
 
-                Json(json!({
+                Ok::<Response, Response>(Json(json!({
                     "session": session,
                     "result": json!({
                         "rowsAffected": conn.affected_rows().to_string(),
@@ -221,9 +227,8 @@ post({
                         "fields": fields,
                         "rows": rows,
                     }),
-                    // error?: VitessError // TODO: Proper error handling
                     "timing": start.elapsed().as_secs_f64(),
-                })).into_response()
+                })).into_response())
         }}})
     )
     .route(
@@ -281,9 +286,7 @@ async fn authentication_and_get_db_conn(
             .await
             .map_err(|err| error!("Error getting DB connection: {err}"))
         else {
-            return Err(
-                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
-            );
+            return Err(error(format!("error retrieving database connection")));
         };
 
         (conn, db)
@@ -305,16 +308,25 @@ async fn authentication_and_get_db_conn(
                 (conn, db)
             }
             Err(mysql_async::Error::Server(err)) if err.code == 1045 => {
-                return Err((StatusCode::UNAUTHORIZED, "Unauthorised!").into_response());
+                return Err(StatusCode::UNAUTHORIZED.into_response());
+            }
+            Err(mysql_async::Error::Server(err)) if err.code == 1049 => {
+                return Err(error(format!("unknown database {database:?}. Ensure your connection URI contains a valid database name.")));
             }
             Err(err) => {
-                error!("Error getting DB connection: {err}");
-                return Err(
-                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
-                );
+                error!("Error getting DB connection to new pool: {err}");
+                return Err(error(format!("error retrieving database connection")));
             }
         }
     })
+}
+
+fn error(msg: String) -> Response {
+    (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({
+        "error": {
+            "message": msg,
+        }
+    }))).into_response()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
