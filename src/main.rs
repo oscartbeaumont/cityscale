@@ -19,6 +19,13 @@ mod config;
 
 #[tokio::main]
 async fn main() {
+    #[cfg(debug_assertions)]
+    {
+        if env::var("RUST_LOG").is_err() {
+            env::set_var("RUST_LOG", "info,cityscale=debug");
+        }
+    }
+
     tracing_subscriber::fmt::init();
 
     let data_dir = PathBuf::from(env::var("DATA_DIR").unwrap_or(".".into()));

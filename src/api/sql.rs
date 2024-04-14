@@ -3,29 +3,34 @@ use std::{
     sync::{Arc, PoisonError, RwLock},
 };
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::post, Json, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    routing::post,
+    Json, Router,
+};
 use axum_extra::{
     headers::{authorization::Basic, Authorization},
     TypedHeader,
 };
 use base64::{engine::general_purpose::STANDARD, Engine};
-use mysql_async::{consts::ColumnType, prelude::Queryable, OptsBuilder, Row, Value};
-use serde::Deserialize;
+use mysql_async::{
+    consts::ColumnType, prelude::Queryable, Conn, OptsBuilder, Pool, Row, Transaction, TxOpts,
+    Value,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error};
 use uuid::Uuid;
 
 use super::AppState;
 
-pub struct Transaction {
-    // TODO
-}
-
 pub struct ConnectionPool {
     /// A map of username + password combo's to database connections
     connections: RwLock<HashMap<(String, String), mysql_async::Pool>>,
     /// Active database transactions
-    sessions: RwLock<HashMap<Uuid, Transaction>>,
+    sessions: tokio::sync::RwLock<HashMap<Uuid, Transaction<'static>>>,
 }
 
 // `@planetscale/database-js`` compatible SQL API
@@ -38,53 +43,112 @@ pub fn mount() -> Router<Arc<AppState>> {
     Router::new()
     .route(
         "/Execute",
-post(move |State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)): TypedHeader<Authorization<Basic>>, Json(data): Json<SqlRequest>|
+post({
+    let pool = pool.clone();
+    move |State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)): TypedHeader<Authorization<Basic>>, Json(mut data): Json<SqlRequest>|
         {
             let pool = pool.clone();
             async move {
-                let key = (auth.username().to_string(), auth.password().to_string());
-                let result = pool.connections.read().unwrap_or_else(PoisonError::into_inner).get(&key).cloned();
-
-                let mut conn = if let Some(db) = result {
-                    let Ok(conn) = db.get_conn().await.map_err(|err| error!("Error getting DB connection: {err}")) else {
-                        return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
-                    };
-
-                    conn
-                } else {
-                    let db = mysql_async::Pool::new(
-                        OptsBuilder::from_opts(state.db_opts.clone())
-                        .user(Some(auth.username()))
-                        .pass(Some(auth.password())));
-
-                    match db.get_conn().await {
-                        Ok(conn) => {
-                            pool.connections.write().unwrap_or_else(PoisonError::into_inner).insert(key, db.clone());
-                            conn
-                        },
-                        Err(mysql_async::Error::Server(err)) if err.code == 1045 => {
-                            return (StatusCode::UNAUTHORIZED, "Unauthorised!").into_response();
-                        }
-                        Err(err) => {
-                            error!("Error getting DB connection: {err}");
-                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
-                        }
-                    }
+                // TODO: Check the credentials against the transaction session to avoid needing to create another connection that will just be dropped
+                let (mut conn, db) = match authentication_and_get_db_conn(&pool, &state, auth).await {
+                    Ok(conn) => conn,
+                    Err(res) => return res,
                 };
 
-                debug!("Executing query {:?} on session {:?}", data.query, ()); // TODO: data.session
-
-                // TODO: `data.session` handling
-                // TODO: Proper error handling using correct format
-
                 let start = std::time::Instant::now();
+                let mut session = None;
 
-                let result = conn
-                    .exec_iter(&data.query, ())
-                    .await
-                    .unwrap();
+                if data.query == "BEGIN" {
+                    let Ok(tx) = db.start_transaction(TxOpts::default()).await.map_err(|err| error!("Error starting DB transaction: {err}")) else {
+                        return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                    };
+    
+                    let id = Uuid::new_v4();
+                    debug!("Creating new DB session {id:?}");
 
-                let fields = result.columns_ref()
+                    {
+                        pool.sessions.write().await.insert(id, tx);
+                    }
+
+                    session = Some(TransactionSession {
+                        id
+                    });
+
+                    // `BEGIN` is run by `db.start_transaction` so we don't actually wanna execute it
+                    return Json(json!({
+                        "session": session,
+                        "result": json!({}),
+                        "timing": start.elapsed().as_secs_f64(),
+                    })).into_response();
+                }
+
+                debug!("Executing query {:?} on session {:?}", data.query, data.session.as_ref().map(|s| s.id));
+
+                let (columns, values) = if let Some(session) = data.session {
+                    // TODO: Can we only lock the specific session, not all of them while the DB query is running
+                    let mut sessions = pool.sessions.write().await;
+
+                    if data.query == "COMMIT" {
+                        let Some(tx) = sessions.remove(&session.id) else {
+                            return (StatusCode::BAD_REQUEST, "Invalid session").into_response();
+                        };
+
+                        let Ok(_) = tx.commit().await.map_err(|err| error!("Error committing transaction: {err}")) else {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                        };
+                        debug!("COMMIT transaction {:?}", session.id);
+
+                        return Json(json!({
+                            "session": session,
+                            "result": json!({}),
+                            "timing": start.elapsed().as_secs_f64(),
+                        })).into_response();
+                    } else if data.query == "ROLLBACK" {
+                        let Some(tx) = sessions.remove(&session.id) else {
+                            return (StatusCode::BAD_REQUEST, "Invalid session").into_response();
+                        };
+
+                        let Ok(_) = tx.rollback().await.map_err(|err| error!("Error rolling back transaction: {err}")) else {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                        };
+                        debug!("ROLLBACK transaction {:?}", session.id);
+                        
+                        return Json(json!({
+                            "session": session,
+                            "result": json!({}),
+                            "timing": start.elapsed().as_secs_f64(),
+                        })).into_response();
+                    } else {
+                        let Some(tx) = sessions.get_mut(&session.id) else {
+                            return (StatusCode::BAD_REQUEST, "Invalid session").into_response();
+                        };
+
+                        let Ok(result) = tx
+                        .exec_iter(&data.query, ())
+                        .await
+                        .map_err(|err| error!("Error executing query: {err}")) else {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                        };
+
+                        (result.columns(), result.collect_and_drop::<Row>().await)
+                    }                    
+                } else {
+                    let Ok(result) =  conn
+                        .exec_iter(&data.query, ())
+                        .await
+                        .map_err(|err| error!("Error executing query: {err}")) else {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                        };
+
+                    (result.columns(), result.collect_and_drop::<Row>().await)
+                };
+
+                let Ok(values) = values.map_err(|err| error!("Error getting values: {err}")) else {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                };
+
+                let fields = columns.as_deref()
+                    .unwrap_or(&[])
                     .iter()
                     .map(|col| {
                         let column_type = match col.column_type() {
@@ -132,9 +196,7 @@ post(move |State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)):
                     })
                     .collect::<Vec<_>>();
 
-                let rows = result.collect_and_drop::<Row>()
-                    .await
-                    .unwrap()
+                let rows = values
                     .into_iter()
                     .map(|mut row| {
                         let mut lengths = Vec::new();
@@ -164,7 +226,7 @@ post(move |State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)):
                 .collect::<Vec<_>>();
 
                 Json(json!({
-                    // session: QuerySession // TODO: Transactions
+                    "session": session,
                     "result": json!({
                         "rowsAffected": conn.affected_rows().to_string(),
                         "insertId": conn.last_insert_id().map(|v| v.to_string()),
@@ -174,44 +236,101 @@ post(move |State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)):
                     // error?: VitessError // TODO: Proper error handling
                     "timing": start.elapsed().as_secs_f64(),
                 })).into_response()
-        }})
+        }}})
     )
     .route(
         "/CreateSession",
-        post(|State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)): TypedHeader<Authorization<Basic>>| async move {
-            println!("CREATE SESSION");
+        post(move |State(state): State<Arc<AppState>>, TypedHeader(Authorization(auth)): TypedHeader<Authorization<Basic>>| {
+            let pool = pool.clone();
+            async move {
+                let (conn, db) = match authentication_and_get_db_conn(&pool, &state, auth).await {
+                    Ok(conn) => conn,
+                    Err(res) => return res,
+                };
+                drop(conn); // TODO: As we use connections for auth creating this is kinda required to cache the credentials (and reducing load on the DB). We can probs workaround this to make this endpoint *wayy* faster in the future.
 
-            // TODO: Authentication
+                let Ok(tx) = db.start_transaction(TxOpts::default()).await.map_err(|err| error!("Error starting DB transaction: {err}")) else {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response();
+                };
 
-            // TODO: Create SQL session
+                let id = Uuid::new_v4();
+                debug!("Creating new DB session {id:?}");
 
-            Json(json!({
-                "branch": "kv6j8r14afd2",
-                "user": {
-                  "username": "vo03t3jabf2lzkhbziqu",
-                  "psid": "aws-ap-southeast-2-1",
-                  "role": "admin"
-                },
-                "session": {
-                  "signature": "anbxhzlZNQvlXTooRSsbCsCOi0DD8LWcrhxXqdjzRCk=",
-                  "vitessSession": {
-                    "autocommit": true,
-                    "options": {
-                      "includedFields": "ALL",
-                      "clientFoundRows": true
-                    },
-                    "DDLStrategy": "direct",
-                    "SessionUUID": "yb2tOZlGa0d5qybWZzNwaQ",
-                    "enableSystemSettings": true
-                  }
+                {
+                    pool.sessions.write().await.insert(id, tx);
                 }
-            }))
+
+                Json(json!({
+                    "session": TransactionSession {
+                        id,
+                    }
+                })).into_response()
+            }
         }),
     )
+}
+
+async fn authentication_and_get_db_conn(
+    pool: &ConnectionPool,
+    state: &AppState,
+    auth: Basic,
+) -> Result<(Conn, Pool), Response> {
+    let key = (auth.username().to_string(), auth.password().to_string());
+    let result = pool
+        .connections
+        .read()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&key)
+        .cloned();
+
+    Ok(if let Some(db) = result {
+        let Ok(conn) = db
+            .get_conn()
+            .await
+            .map_err(|err| error!("Error getting DB connection: {err}"))
+        else {
+            return Err(
+                (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
+            );
+        };
+
+        (conn, db)
+    } else {
+        let db = mysql_async::Pool::new(
+            OptsBuilder::from_opts(state.db_opts.clone())
+                .user(Some(auth.username()))
+                .pass(Some(auth.password()))
+                .stmt_cache_size(0), // TODO: Should we renable this? It breaks transactions
+        );
+
+        match db.get_conn().await {
+            Ok(conn) => {
+                pool.connections
+                    .write()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .insert(key, db.clone());
+                (conn, db)
+            }
+            Err(mysql_async::Error::Server(err)) if err.code == 1045 => {
+                return Err((StatusCode::UNAUTHORIZED, "Unauthorised!").into_response());
+            }
+            Err(err) => {
+                error!("Error getting DB connection: {err}");
+                return Err(
+                    (StatusCode::INTERNAL_SERVER_ERROR, "Internal Server Error").into_response()
+                );
+            }
+        }
+    })
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct TransactionSession {
+    id: Uuid,
 }
 
 #[derive(Deserialize)]
 pub struct SqlRequest {
     query: String,
-    // session: ()// TODO:
+    session: Option<TransactionSession>,
 }
