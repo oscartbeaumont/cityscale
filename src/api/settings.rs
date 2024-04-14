@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use argon2::{password_hash::{SaltString, PasswordHasher}, Argon2};
 use axum::{
     extract::{Path, State},
     http::StatusCode,
@@ -7,6 +8,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
+use rand::rngs::OsRng;
 use serde::Deserialize;
 use serde_json::json;
 use tower_cookies::{Cookies, Key};
@@ -36,8 +38,13 @@ pub fn mount() -> Router<Arc<AppState>> {
         .route(
             "/admin",
             post(|State(state): State<Arc<AppState>>, Json(data): Json<CreateUserRequest>| async move {               
+                let salt = SaltString::generate(&mut OsRng);
+                let Ok(password_hash) = Argon2::default().hash_password(data.password.as_bytes(), &salt) else {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to hash password!").into_response();
+                };
+                
                 let mut config = state.config.edit();
-                config.admins.insert(data.username, data.password);
+                config.admins.insert(data.username, password_hash.to_string());
 
                 if config.commit().map_err(|err| error!("Error saving config: {err:?}")).is_err() {
                     return (StatusCode::INTERNAL_SERVER_ERROR, "Failed to commit changes!").into_response();

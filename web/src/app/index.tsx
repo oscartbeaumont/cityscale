@@ -73,7 +73,7 @@ export default function Page() {
           Create DB
         </button>
       </div>
-      <ul class="flex flex-col space-y-4">
+      <ul class="flex flex-col space-y-4 p-4">
         <For each={dbs()} fallback={<li>No databases found!</li>}>
           {(db) => (
             <li class="border p-4 flex justify-between">
