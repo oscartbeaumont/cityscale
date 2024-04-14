@@ -10,7 +10,8 @@ The MySQL database platform for side projects.
  - Create database and users from web UI
  - Create and merge database branches (similar to Planetscale)
  - Create and manage database backups to S3-compatible storage
- - Cheap to operate (less than 5$ a month on Railway)
+ - Edge runtime support via full compatibility with [`@planetscale/database-js`](https://github.com/planetscale/database-js)
+ - Cheap to and easy to operate (one click deploy for less than 5$ a month on [Railway](https://railway.app))
 
 ### Dashboard
 
@@ -20,7 +21,7 @@ Cityscale comes with a web dashboard to manage your databases.
     <img src="./.github/preview.png" alt="Cityscale Dashboard" width="50%">
 </div>
 
-### Deploy Cityscale
+### Deployment Guide
 
 ### Railway
 
