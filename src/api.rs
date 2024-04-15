@@ -378,7 +378,7 @@ pub fn mount(state: Arc<AppState>) -> axum::Router {
                                     }
 
                                     result
-                                }).flatten().collect::<Vec<_>>()
+                                }).collect::<Vec<_>>()
                             }),
                         Err(err) => {
                             error!("Error executing statement: {err}");

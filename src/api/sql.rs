@@ -82,7 +82,7 @@ post({
                     })).into_response());
                 }
 
-                let (columns, values) = if let Some(session) = data.session {
+                let (columns, values, rows_affected, last_insert_id) = if let Some(session) = data.session {
                     // TODO: Can we only lock the specific session, not all of them while the DB query is running
                     let mut sessions = pool.sessions.write().await;
 
@@ -135,7 +135,7 @@ post({
                                 error(format!("error executing query: {err:?}"))
                             })?;
 
-                        (result.columns(), result.collect_and_drop::<Row>().await)
+                        (result.columns(), result.collect_and_drop::<Row>().await, tx.affected_rows().to_string(), tx.last_insert_id().map(|v| v.to_string()))
                     }
                 } else {
                     debug!("Executing query {:?}", data.query);
@@ -147,7 +147,7 @@ post({
                             error(format!("error executing query: {err:?}"))
                         })?;
 
-                    (result.columns(), result.collect_and_drop::<Row>().await)
+                    (result.columns(), result.collect_and_drop::<Row>().await, conn.affected_rows().to_string(), conn.last_insert_id().map(|v| v.to_string()))
                 };
 
                 let values = values.map_err(|err| {
@@ -225,8 +225,8 @@ post({
                 Ok::<Response, Response>(Json(json!({
                     "session": session,
                     "result": json!({
-                        "rowsAffected": conn.affected_rows().to_string(),
-                        "insertId": conn.last_insert_id().map(|v| v.to_string()),
+                        "rowsAffected": rows_affected,
+                        "insertId": last_insert_id,
                         "fields": fields,
                         "rows": rows,
                     }),
